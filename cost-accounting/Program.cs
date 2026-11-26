@@ -20,7 +20,7 @@ class ExpenseLog<T> where T : IHasAmount
 {
     private readonly List<T> _items = [];
     private Func<T, string>? _grouping;
-    private readonly string _defaultGrouping = "All";
+    private readonly string _defaultGrouping = "Усього";
 
     public void Add(T item) => _items.Add(item);
 
@@ -71,7 +71,7 @@ static class Program
         // Controls
         // * Up/Down
         // * Enter
-        // mark chosen point with (*)
+        // mark chosen option with (*)
 
         int menuItemIndex = 0;
         int minMenuItemIndex = 0;
@@ -81,7 +81,7 @@ static class Program
         {
             ShowMenu(menuItemIndex);
 
-            var input = Console.ReadKey();
+            var input = Console.ReadKey(true);
 
             switch (input.Key)
             {
@@ -103,14 +103,6 @@ static class Program
 
             Console.Clear();
         }
-
-        //log.SetGrouping(e => e.Category);
-
-        //Console.WriteLine("Expenses report:");
-        //foreach(var record in log.GetReport())
-        //{
-        //    Console.WriteLine($"\t{record.Key} - {record.Value}₴");
-        //}
     }
 
     private static void ShowMenu(int index)
@@ -124,10 +116,19 @@ static class Program
         Console.WriteLine($"({(index == 5 ? '*' : ' ')}) Показати витрати, що перевищують бюджет");
     }
 
+    private static void ShowGroupingOptions(int index)
+    {
+        Console.WriteLine("\n\t<<<< Спосіб групування витрат >>>>");
+        Console.WriteLine($"({(index == 0 ? '*' : ' ')}) За замовчуванням");
+        Console.WriteLine($"({(index == 1 ? '*' : ' ')}) За категорією");
+        Console.WriteLine($"({(index == 2 ? '*' : ' ')}) За магазином");
+        Console.WriteLine($"({(index == 3 ? '*' : ' ')}) За місяцем");
+    }
+
     private static void AwaitKeyToProceed()
     {
         Console.Write("Натисніть будь-яку клавішу щоб продовжити ...");
-        _ = Console.ReadKey();
+        _ = Console.ReadKey(true);
     }
 
     private static bool HandleMenuChoice(int index, ExpenseLog<Expense> log)
@@ -149,20 +150,73 @@ static class Program
 
     private static bool HandleChangeGrouping(ExpenseLog<Expense> log)
     {
-        throw new NotImplementedException();
+        int menuItemIndex = 0;
+        int minMenuItemIndex = 0;
+        int maxMenuItemIndex = 3;
+
+        bool isRunning = true;
+
+        while (isRunning)
+        {
+            ShowGroupingOptions(menuItemIndex);
+
+            var input = Console.ReadKey(true);
+
+            switch (input.Key)
+            {
+                case ConsoleKey.UpArrow:
+                    if (menuItemIndex > minMenuItemIndex)
+                        --menuItemIndex;
+                    break;
+                case ConsoleKey.DownArrow:
+                    if (menuItemIndex < maxMenuItemIndex)
+                        ++menuItemIndex;
+                    break;
+                case ConsoleKey.Enter:
+                    Console.Clear();
+                    isRunning = HandleGroupChoice(menuItemIndex, log);
+                    break;
+                default:
+                    break;
+            }
+
+            Console.Clear();
+        }
+
+        return true;
+    }
+
+    private static bool HandleGroupChoice(int index, ExpenseLog<Expense> log)
+    {
+        log.SetGrouping(index switch
+        {
+            1 => expense => expense.Category,
+            2 => expense => expense.Shop,
+            3 => expense => expense.Date.ToString("yyyy-MM"),
+            _ => null
+        });
+
+        return false;
     }
 
     private static bool HandleGetReport(ExpenseLog<Expense> log)
     {
-        throw new NotImplementedException();
+        Console.WriteLine("Звіт з витратності:");
+        foreach (var record in log.GetReport())
+        {
+            Console.WriteLine($"\t{record.Key} - {record.Value}₴");
+        }
+
+        AwaitKeyToProceed();
+        return true;
     }
 
     private static bool HandleShowAllExpenses(ExpenseLog<Expense> log)
     {
         Action<Expense> print =
-            expense => Console.WriteLine($"\t> {expense.Category} - {expense.Shop} - {expense.Amount}₴");
+            expense => Console.WriteLine($"\t({expense.Date}) {expense.Category} - {expense.Shop} - {expense.Amount}₴");
         log.ForEach(print);
-        
+
         AwaitKeyToProceed();
         return true;
     }
