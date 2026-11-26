@@ -1,10 +1,18 @@
 ﻿using System.Text;
 
-namespace cost_accounting;
+namespace CostAccounting;
 
 interface IHasAmount
 {
     decimal Amount { get; }
+}
+
+// primary constructor usage
+public class BudgetExceededEventArgs<T>(T item, decimal totalAmount, decimal budget) : EventArgs
+{
+    public T Item { get; } = item;
+    public decimal TotalAmount { get; } = totalAmount;
+    public decimal Budget { get; } = budget;
 }
 
 // primary constructor usage
@@ -16,15 +24,30 @@ class Expense(string category, string shop, decimal amount) : IHasAmount
     public decimal Amount { get; } = amount;
 }
 
-class ExpenseLog<T> where T : IHasAmount
+class ExpenseLog<T>(decimal budget) where T : IHasAmount
 {
+    private readonly decimal _budget = budget;
     private readonly List<T> _items = [];
     private Func<T, string>? _grouping;
     private readonly string _defaultGrouping = "Усього";
 
-    public void Add(T item) => _items.Add(item);
+    public event EventHandler<BudgetExceededEventArgs<T>>? BudgetExceeded;
+
+    protected virtual void OnBudgetExceeded(BudgetExceededEventArgs<T> e) => BudgetExceeded?.Invoke(this, e);
+
+    public void Add(T item)
+    {
+        _items.Add(item);
+
+        decimal total = GetTotal();
+        if (total > _budget)
+        {
+            OnBudgetExceeded(new BudgetExceededEventArgs<T>(item, GetTotal(), _budget));
+        }
+    }
 
     public decimal GetTotal() => _items.Sum(item => item.Amount);
+    public decimal GetBudget() => _budget;
 
     public Dictionary<string, decimal> GetReport()
     {
@@ -51,22 +74,28 @@ class ExpenseLog<T> where T : IHasAmount
             action(item);
         }
     }
-
 }
 
 static class Program
 {
+    private static readonly List<Expense> _excess = [];
+
     public static void Main()
     {
         Console.OutputEncoding = Encoding.UTF8;
 
-        var log = new ExpenseLog<Expense>();
+        const decimal budget = 25_000m;
+        var log = new ExpenseLog<Expense>(budget);
 
-        log.Add(new Expense("Tech", "Rozetka", 15_000m));
+        log.Add(new Expense("Tech", "Rozetka", 10_000m));
         log.Add(new Expense("Food", "Silpo", 35m));
         log.Add(new Expense("Tech", "Foxtrot", 5_000m));
 
-        bool isRunning = true;
+        uint addedThisSession = 0;
+
+        log.BudgetExceeded += (sender, e) => addedThisSession++;
+        log.BudgetExceeded += LogExpenseExceeded;
+        log.BudgetExceeded += AddExcessiveExpense;
 
         // Controls
         // * Up/Down
@@ -77,6 +106,7 @@ static class Program
         int minMenuItemIndex = 0;
         int maxMenuItemIndex = 5;
 
+        bool isRunning = true;
         while (isRunning)
         {
             ShowMenu(menuItemIndex);
@@ -103,6 +133,18 @@ static class Program
 
             Console.Clear();
         }
+
+        Console.WriteLine($"У підсумку {addedThisSession} витрати, які перевищили бюджет.");
+    }
+
+    private static void AddExcessiveExpense(object? sender, BudgetExceededEventArgs<Expense> e)
+        => _excess.Add(e.Item);
+
+    private static void LogExpenseExceeded(object? sender, BudgetExceededEventArgs<Expense> e)
+    {
+        Console.WriteLine($"[подія] Витрата \"{e.Item.Category} ({e.Item.Amount})₴\" перевищила бюджет.");
+        Console.WriteLine($"        Поточні витрати: {e.TotalAmount}₴");
+        AwaitAnyKeyToProceed();
     }
 
     private static void ShowMenu(int index)
@@ -125,7 +167,7 @@ static class Program
         Console.WriteLine($"({(index == 3 ? '*' : ' ')}) За місяцем");
     }
 
-    private static void AwaitKeyToProceed()
+    private static void AwaitAnyKeyToProceed()
     {
         Console.Write("Натисніть будь-яку клавішу щоб продовжити ...");
         _ = Console.ReadKey(true);
@@ -139,13 +181,27 @@ static class Program
             2 => HandleShowAllExpenses(log),
             3 => HandleGetReport(log),
             4 => HandleChangeGrouping(log),
-            5 => HandleShowExpensesExceedingBudget(log),
+            5 => HandleShowExcessiveExpenses(log),
             _ => true
         };
 
-    private static bool HandleShowExpensesExceedingBudget(ExpenseLog<Expense> log)
+    private static bool HandleShowExcessiveExpenses(ExpenseLog<Expense> log)
     {
-        throw new NotImplementedException();
+        if (_excess.Count > 0)
+        {
+            Console.WriteLine($"Ці витрати перевищили допустимий ({log.GetBudget()}₴) бюджет.");
+            foreach (Expense expense in _excess)
+            {
+                Console.WriteLine($"\t({expense.Date}) {expense.Category} - {expense.Shop} - {expense.Amount}₴");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"Поки немає витрат, що перевищують допустимий ({log.GetBudget()}₴) бюджет.");
+        }
+
+        AwaitAnyKeyToProceed();
+        return true;
     }
 
     private static bool HandleChangeGrouping(ExpenseLog<Expense> log)
@@ -207,7 +263,7 @@ static class Program
             Console.WriteLine($"\t{record.Key} - {record.Value}₴");
         }
 
-        AwaitKeyToProceed();
+        AwaitAnyKeyToProceed();
         return true;
     }
 
@@ -217,7 +273,7 @@ static class Program
             expense => Console.WriteLine($"\t({expense.Date}) {expense.Category} - {expense.Shop} - {expense.Amount}₴");
         log.ForEach(print);
 
-        AwaitKeyToProceed();
+        AwaitAnyKeyToProceed();
         return true;
     }
 
