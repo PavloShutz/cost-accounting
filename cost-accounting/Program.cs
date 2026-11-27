@@ -26,10 +26,9 @@ class Expense(string category, string shop, decimal amount) : IHasAmount
 
 class ExpenseLog<T>(decimal budget) where T : IHasAmount
 {
-    private readonly decimal _budget = budget;
     private readonly List<T> _items = [];
     private Func<T, string>? _grouping;
-    private readonly string _defaultGrouping = "Усього";
+    private const string _defaultGrouping = "Усього";
 
     public event EventHandler<BudgetExceededEventArgs<T>>? BudgetExceeded;
 
@@ -40,14 +39,14 @@ class ExpenseLog<T>(decimal budget) where T : IHasAmount
         _items.Add(item);
 
         decimal total = GetTotal();
-        if (total > _budget)
+        if (total > Budget)
         {
-            OnBudgetExceeded(new BudgetExceededEventArgs<T>(item, GetTotal(), _budget));
+            OnBudgetExceeded(new BudgetExceededEventArgs<T>(item, total, Budget));
         }
     }
 
     public decimal GetTotal() => _items.Sum(item => item.Amount);
-    public decimal GetBudget() => _budget;
+    public decimal Budget { get; } = budget;
 
     public Dictionary<string, decimal> GetReport()
     {
@@ -78,7 +77,7 @@ class ExpenseLog<T>(decimal budget) where T : IHasAmount
 
 static class Program
 {
-    private static readonly List<Expense> _excess = [];
+    private static readonly List<Expense> _overBudgetExpenses = [];
 
     public static void Main()
     {
@@ -87,162 +86,142 @@ static class Program
         const decimal budget = 25_000m;
         var log = new ExpenseLog<Expense>(budget);
 
+        uint overBudgetCount = 0;
+
+        log.BudgetExceeded += (sender, e) => overBudgetCount++;
+        log.BudgetExceeded += LogExpenseExceeded;
+        log.BudgetExceeded += AddExcessiveExpense;
+
         log.Add(new Expense("Tech", "Rozetka", 10_000m));
         log.Add(new Expense("Food", "Silpo", 35m));
         log.Add(new Expense("Tech", "Foxtrot", 5_000m));
-
-        uint addedThisSession = 0;
-
-        log.BudgetExceeded += (sender, e) => addedThisSession++;
-        log.BudgetExceeded += LogExpenseExceeded;
-        log.BudgetExceeded += AddExcessiveExpense;
 
         // Controls
         // * Up/Down
         // * Enter
         // mark chosen option with (*)
 
+        string[] menuOptions =
+        [
+            "Вийти",
+            "Додати витрату",
+            "Показати всі витрати",
+            "Звіт з витратності",
+            "Змінити групування",
+            "Показати витрати, що перевищують бюджет"
+        ];
+
         int menuItemIndex = 0;
-        int minMenuItemIndex = 0;
-        int maxMenuItemIndex = 5;
 
-        bool isRunning = true;
-        while (isRunning)
+        while (true)
         {
-            ShowMenu(menuItemIndex);
+            menuItemIndex = SelectOption("Меню", menuOptions, menuItemIndex);
 
-            var input = Console.ReadKey(true);
+            if (menuItemIndex == 0)
+                break;
 
-            switch (input.Key)
-            {
-                case ConsoleKey.UpArrow:
-                    if (menuItemIndex > minMenuItemIndex)
-                        --menuItemIndex;
-                    break;
-                case ConsoleKey.DownArrow:
-                    if (menuItemIndex < maxMenuItemIndex)
-                        ++menuItemIndex;
-                    break;
-                case ConsoleKey.Enter:
-                    Console.Clear();
-                    isRunning = HandleMenuChoice(menuItemIndex, log);
-                    break;
-                default:
-                    break;
-            }
-
-            Console.Clear();
+            HandleMenuChoice(menuItemIndex, log);
         }
 
-        Console.WriteLine($"У підсумку {addedThisSession} витрати, які перевищили бюджет.");
+        Console.WriteLine($"Витрат понад бюджет за сеанс: {overBudgetCount}");
     }
 
     private static void AddExcessiveExpense(object? sender, BudgetExceededEventArgs<Expense> e)
-        => _excess.Add(e.Item);
+        => _overBudgetExpenses.Add(e.Item);
 
     private static void LogExpenseExceeded(object? sender, BudgetExceededEventArgs<Expense> e)
     {
-        Console.WriteLine($"[подія] Витрата \"{e.Item.Category} ({e.Item.Amount})₴\" перевищила бюджет.");
-        Console.WriteLine($"        Поточні витрати: {e.TotalAmount}₴");
+        Console.WriteLine($"[подія] Витрата \"{e.Item.Category} ({e.Item.Amount:F2}₴)\" перевищила бюджет.");
+        Console.WriteLine($"        Поточні витрати: {e.TotalAmount:F2}₴");
         AwaitAnyKeyToProceed();
     }
 
-    private static void ShowMenu(int index)
+    private static int SelectOption(string title, string[] options, int index = 0)
     {
-        Console.WriteLine("\n\t<<<< Меню >>>>");
-        Console.WriteLine($"({(index == 0 ? '*' : ' ')}) Вийти");
-        Console.WriteLine($"({(index == 1 ? '*' : ' ')}) Додати витрату");
-        Console.WriteLine($"({(index == 2 ? '*' : ' ')}) Показати всі витрати");
-        Console.WriteLine($"({(index == 3 ? '*' : ' ')}) Звіт з витратності");
-        Console.WriteLine($"({(index == 4 ? '*' : ' ')}) Змінити групування");
-        Console.WriteLine($"({(index == 5 ? '*' : ' ')}) Показати витрати, що перевищують бюджет");
-    }
+        while (true)
+        {
+            Console.Clear();
+            Console.WriteLine($"\n\t<<<< {title} >>>>");
 
-    private static void ShowGroupingOptions(int index)
-    {
-        Console.WriteLine("\n\t<<<< Спосіб групування витрат >>>>");
-        Console.WriteLine($"({(index == 0 ? '*' : ' ')}) За замовчуванням");
-        Console.WriteLine($"({(index == 1 ? '*' : ' ')}) За категорією");
-        Console.WriteLine($"({(index == 2 ? '*' : ' ')}) За магазином");
-        Console.WriteLine($"({(index == 3 ? '*' : ' ')}) За місяцем");
+            for (int i = 0; i < options.Length; i++)
+                Console.WriteLine($"({(i == index ? '*' : ' ')}) {options[i]}");
+
+            switch (Console.ReadKey(true).Key)
+            {
+                case ConsoleKey.UpArrow when index > 0:
+                    index--;
+                    break;
+                case ConsoleKey.DownArrow when index < options.Length - 1:
+                    index++;
+                    break;
+                case ConsoleKey.Enter:
+                    Console.Clear();
+                    return index;
+            }
+        }
     }
 
     private static void AwaitAnyKeyToProceed()
     {
-        Console.Write("Натисніть будь-яку клавішу щоб продовжити ...");
+        Console.Write("\nНатисніть будь-яку клавішу щоб продовжити ...");
         _ = Console.ReadKey(true);
     }
 
-    private static bool HandleMenuChoice(int index, ExpenseLog<Expense> log)
-        => index switch
-        {
-            0 => false,
-            1 => HandleAdd(log),
-            2 => HandleShowAllExpenses(log),
-            3 => HandleGetReport(log),
-            4 => HandleChangeGrouping(log),
-            5 => HandleShowExcessiveExpenses(log),
-            _ => true
-        };
-
-    private static bool HandleShowExcessiveExpenses(ExpenseLog<Expense> log)
+    private static void HandleMenuChoice(int index, ExpenseLog<Expense> log)
     {
-        if (_excess.Count > 0)
+        switch (index)
         {
-            Console.WriteLine($"Ці витрати перевищили допустимий ({log.GetBudget()}₴) бюджет.");
-            foreach (Expense expense in _excess)
+            case 1:
+                HandleAdd(log);
+                break;
+            case 2:
+                HandleShowAllExpenses(log);
+                break;
+            case 3:
+                HandleGetReport(log);
+                break;
+            case 4:
+                HandleChangeGrouping(log);
+                break;
+            case 5:
+                HandleShowExcessiveExpenses(log);
+                break;
+        }
+    }
+
+    private static void HandleShowExcessiveExpenses(ExpenseLog<Expense> log)
+    {
+        if (_overBudgetExpenses.Count > 0)
+        {
+            Console.WriteLine($"Ці витрати перевищили допустимий ({log.Budget:F2}₴) бюджет.");
+            foreach (Expense expense in _overBudgetExpenses)
             {
-                Console.WriteLine($"\t({expense.Date}) {expense.Category} - {expense.Shop} - {expense.Amount}₴");
+                Console.WriteLine($"\t({expense.Date}) {expense.Category} - {expense.Shop} - {expense.Amount:F2}₴");
             }
         }
         else
         {
-            Console.WriteLine($"Поки немає витрат, що перевищують допустимий ({log.GetBudget()}₴) бюджет.");
+            Console.WriteLine($"Поки немає витрат, що перевищують допустимий ({log.Budget:F2}₴) бюджет.");
         }
 
         AwaitAnyKeyToProceed();
-        return true;
     }
 
-    private static bool HandleChangeGrouping(ExpenseLog<Expense> log)
+    private static void HandleChangeGrouping(ExpenseLog<Expense> log)
     {
-        int menuItemIndex = 0;
-        int minMenuItemIndex = 0;
-        int maxMenuItemIndex = 3;
+        string[] groupingOptions =
+        [
+            "Без групування",
+            "За категорією",
+            "За магазином",
+            "За місяцем"
+        ];
 
-        bool isRunning = true;
-
-        while (isRunning)
-        {
-            ShowGroupingOptions(menuItemIndex);
-
-            var input = Console.ReadKey(true);
-
-            switch (input.Key)
-            {
-                case ConsoleKey.UpArrow:
-                    if (menuItemIndex > minMenuItemIndex)
-                        --menuItemIndex;
-                    break;
-                case ConsoleKey.DownArrow:
-                    if (menuItemIndex < maxMenuItemIndex)
-                        ++menuItemIndex;
-                    break;
-                case ConsoleKey.Enter:
-                    Console.Clear();
-                    isRunning = HandleGroupChoice(menuItemIndex, log);
-                    break;
-                default:
-                    break;
-            }
-
-            Console.Clear();
-        }
-
-        return true;
+        int index = SelectOption("Спосіб групування витрат", groupingOptions);
+        HandleGroupChoice(index, log);
     }
 
-    private static bool HandleGroupChoice(int index, ExpenseLog<Expense> log)
+    private static void HandleGroupChoice(int index, ExpenseLog<Expense> log)
     {
         log.SetGrouping(index switch
         {
@@ -251,33 +230,49 @@ static class Program
             3 => expense => expense.Date.ToString("yyyy-MM"),
             _ => null
         });
-
-        return false;
     }
 
-    private static bool HandleGetReport(ExpenseLog<Expense> log)
+    private static void HandleGetReport(ExpenseLog<Expense> log)
     {
-        Console.WriteLine("Звіт з витратності:");
-        foreach (var record in log.GetReport())
+        var report = log.GetReport();
+
+        if (report.Count > 0)
         {
-            Console.WriteLine($"\t{record.Key} - {record.Value}₴");
+            Console.WriteLine("Звіт з витратності:");
+            foreach (var record in report)
+            {
+                Console.WriteLine($"\t{record.Key} - {record.Value:F2}₴");
+            }
+
+            Console.WriteLine($"Загальна сума: {log.GetTotal():F2}₴");
+        }
+        else
+        {
+            Console.WriteLine("Поки немає витрат.");
         }
 
         AwaitAnyKeyToProceed();
-        return true;
     }
 
-    private static bool HandleShowAllExpenses(ExpenseLog<Expense> log)
+    private static void HandleShowAllExpenses(ExpenseLog<Expense> log)
     {
+        bool hasExpenses = false;
+
         Action<Expense> print =
-            expense => Console.WriteLine($"\t({expense.Date}) {expense.Category} - {expense.Shop} - {expense.Amount}₴");
+            expense =>
+            {
+                hasExpenses = true;
+                Console.WriteLine($"\t({expense.Date}) {expense.Category} - {expense.Shop} - {expense.Amount:F2}₴");
+            };
         log.ForEach(print);
 
+        if (!hasExpenses)
+            Console.WriteLine("Поки немає витрат.");
+
         AwaitAnyKeyToProceed();
-        return true;
     }
 
-    private static bool HandleAdd(ExpenseLog<Expense> log)
+    private static void HandleAdd(ExpenseLog<Expense> log)
     {
         string category = ReadNonEmpty("Категорія: ");
         string shop = ReadNonEmpty("Магазин: ");
@@ -285,8 +280,6 @@ static class Program
 
         var expense = new Expense(category, shop, amount);
         log.Add(expense);
-
-        return true;
     }
 
     private static string ReadNonEmpty(string prompt)
@@ -312,12 +305,12 @@ static class Program
             Console.Write(prompt);
             string? input = Console.ReadLine();
 
-            if (decimal.TryParse(input, out decimal value))
+            if (decimal.TryParse(input, out decimal value) && value > 0)
             {
                 return value;
             }
 
-            Console.WriteLine($"Некоректне значення!");
+            Console.WriteLine("Некоректне значення!");
         }
     }
 }
